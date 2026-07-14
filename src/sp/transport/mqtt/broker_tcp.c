@@ -1766,6 +1766,10 @@ tcptran_pipe_getopt(
 			if (msg == NULL) {
 				break;
 			}
+			// get_one returns a QoS-tagged pointer; strip before any
+			// nni_msg use (broker rows carry tag 0 today, but the
+			// invariant should not depend on that)
+			msg = MQTT_DB_GET_MSG_POINTER(msg);
 
 			nni_msg       *rmsg = msg;
 			property      *prop = NULL;
@@ -1791,7 +1795,8 @@ tcptran_pipe_getopt(
 				    p->npipe->nano_qos_db, p->npipe->p_id, pid);
 				continue;
 
-			} else if ((ntime - mtime) >= (long unsigned) qos_duration * 1250) {
+			} else if (req->drain ||
+			    (ntime - mtime) >= (long unsigned) qos_duration * 1250) {
 				if (!is_sqlite) {
 					nni_msg_clone(msg);
 				}

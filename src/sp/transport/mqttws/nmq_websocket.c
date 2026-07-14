@@ -448,6 +448,10 @@ done:
 		uint16_t  packet_id   = 0;
 		uint8_t   cmd         = nni_msg_cmd_type(vmsg);
 		if (cmd == CMD_PUBLISH) {
+			// timestamp at receipt, mirroring broker_tcp/broker_tls:
+			// the qos db's retry age gate and the session-resume
+			// drain's backlog/in-flight distinction both rely on it
+			nni_msg_set_timestamp(vmsg, nng_clock());
 			qos_pac = nni_msg_get_pub_qos(vmsg);
 			if (qos_pac > 0) {
 				// flow control, check rx_max
@@ -1589,6 +1593,10 @@ wstran_pipe_getopt(void *arg, const char *name, void *buf, size_t *szp, nni_type
 			if (msg == NULL) {
 				break;
 			}
+			// get_one returns a QoS-tagged pointer; strip before any
+			// nni_msg use (broker rows carry tag 0 today, but the
+			// invariant should not depend on that)
+			msg = MQTT_DB_GET_MSG_POINTER(msg);
 
 			nni_msg       *rmsg = msg;
 			property      *prop = NULL;
@@ -1608,7 +1616,8 @@ wstran_pipe_getopt(void *arg, const char *name, void *buf, size_t *szp, nni_type
 				nni_qos_db_remove_msg(is_sqlite, p->npipe->nano_qos_db, rmsg);
 				nni_qos_db_remove(is_sqlite, p->npipe->nano_qos_db, p->npipe->p_id, pid);
 				continue;
-			} else if ((ntime - mtime) >= (long unsigned) qos_duration * 1250) {
+			} else if (req->drain ||
+			    (ntime - mtime) >= (long unsigned) qos_duration * 1250) {
 				if (!is_sqlite) {
 					nni_msg_clone(msg);
 				}
