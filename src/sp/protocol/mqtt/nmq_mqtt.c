@@ -105,8 +105,12 @@ struct nano_pipe {
 	                           // chains the next fetch, so acks of
 	                           // interleaved live traffic cannot re-fetch
 	                           // an un-PUBCOMP'd QoS2 head
-	nni_time      resume_time; // when the session resumed; stored msgs newer
-	                           // than this are in-flight, not backlog
+	uint16_t      drain_pid_high; // parked pipe's packet-id counter at
+	                              // resume: stored rows with pids past it
+	                              // (serial arithmetic) were stored after
+	                              // resume - live in-flight traffic (incl.
+	                              // retained/bridged msgs whose receipt
+	                              // timestamps predate resume), not backlog
 	void         *tree;  // root node of db tree
 	void         *nano_qos_db; // 'sqlite' or 'nni_id_hash_map'
 	nni_aio       aio_send;
@@ -669,7 +673,7 @@ nano_pipe_init(void *arg, nni_pipe *pipe, void *s)
 	p->drain_wait      = false;
 	p->drain_retry     = 0;
 	p->drain_pid       = 0;
-	p->resume_time     = 0;
+	p->drain_pid_high  = 0;
 	p->tree        = sock->db;
 	if (p->conn_param != NULL)
 		p->keepalive   = p->conn_param->keepalive_mqtt;
@@ -788,17 +792,20 @@ auth_verify:
 		if (old != NULL) {
 			// arm the backlog drain (opt-in via resend_on_ack):
 			// stored QoS msgs are sent right after the CONNACK
-			// instead of waiting for the resend timer. Live
-			// in-flight rows are told apart from backlog by msg
-			// timestamp, which is only comparable within one
-			// process - sessions restored from SQLite across a
-			// broker restart keep relying on the resend timer.
+			// instead of waiting for the resend timer. Backlog is
+			// told apart from live in-flight rows by packet id:
+			// the parked pipe's counter assigned every backlog
+			// pid, and the resumed pipe continues from it. The
+			// drain only arms for a session parked in this
+			// process (old != NULL) - sessions restored from
+			// SQLite across a broker restart keep relying on the
+			// resend timer.
 			if (s->conf->resend_on_ack) {
-				p->resumed     = true;
-				p->resume_time = nng_clock();
-				p->drain_sent  = false;
-				p->drain_retry = NANO_DRAIN_RETRY;
-				p->drain_pid   = 0;
+				p->resumed        = true;
+				p->drain_pid_high = old->pipe->packet_id;
+				p->drain_sent     = false;
+				p->drain_retry    = NANO_DRAIN_RETRY;
+				p->drain_pid      = 0;
 			}
 			// there should be no msg in this map
 			if (!is_sqlite && p->pipe->nano_qos_db!= NULL) {
@@ -1064,12 +1071,12 @@ nano_pipe_close(void *arg)
 }
 
 // Fetch one stored QoS msg (drain mode: transport age gate bypassed) and
-// resend it on p->aio_send. Caller must hold p->lk with p->busy == false
+// resend it on p->aio_send. Caller must hold p->lk with p->aio_send idle
 // and p->draining == true. Returns true when a msg was put on the wire.
-// Disarms the drain when the store is empty or the oldest row was stored
-// after session resume (an in-flight msg of the live pipe, not backlog -
-// resending those on every ACK would duplicate normal traffic; they stay
-// owned by the resend timer).
+// Disarms the drain when the store is empty or the oldest row's packet id
+// is past the resume snapshot (an in-flight msg of the live pipe, not
+// backlog - resending those on every ACK would duplicate normal traffic;
+// they stay owned by the resend timer).
 static bool
 nano_pipe_drain_qos(nano_pipe *p)
 {
@@ -1099,7 +1106,12 @@ nano_pipe_drain_qos(nano_pipe *p)
 		p->draining = false;
 		return false;
 	}
-	if (nni_msg_get_timestamp(req.msg) > p->resume_time) {
+	// wrap-aware serial comparison: pids in (drain_pid_high, +0x8000)
+	// were assigned after resume. Receipt timestamps cannot make this
+	// call - retained and bridged msgs stored after resume carry old
+	// (or zero) timestamps
+	uint16_t ahead = (uint16_t) (req.packet_id - p->drain_pid_high);
+	if (ahead != 0 && ahead < 0x8000) {
 		// backlog exhausted; remaining rows are live in-flight msgs
 		nni_msg_free(req.msg);
 		p->draining = false;
