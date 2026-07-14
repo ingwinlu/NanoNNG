@@ -344,6 +344,7 @@ conf_basic_parse_ver2(conf *config, cJSON *jso)
 		    config, max_topic_alias, "max_topic_alias", jso_mqtt);
 		hocon_read_time_base(
 		    config, qos_duration, "retry_interval", jso_mqtt);
+		hocon_read_bool(config, resend_on_ack, jso_mqtt);
 		hocon_read_num_base(
 		    config, backoff, "keepalive_multiplier", jso_mqtt);
 

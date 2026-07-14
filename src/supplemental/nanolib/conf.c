@@ -460,6 +460,12 @@ conf_basic_parse(conf *config, const char *path)
 			config->qos_duration = atoi(value);
 			nng_strfree(value);
 		} else if ((value = get_conf_value(
+		                line, sz, "resend_on_ack")) != NULL) {
+			config->resend_on_ack =
+			    nni_strcasecmp(value, "yes") == 0 ||
+			    nni_strcasecmp(value, "true") == 0;
+			nng_strfree(value);
+		} else if ((value = get_conf_value(
 		                line, sz, "allow_anonymous")) != NULL) {
 			config->allow_anonymous =
 			    nni_strcasecmp(value, "yes") == 0 ||
@@ -912,6 +918,7 @@ conf_init(conf *nanomq_conf)
 	nanomq_conf->msq_len       = 20480;
 	nanomq_conf->msq_len       = 1024;
 	nanomq_conf->qos_duration  = 10;
+	nanomq_conf->resend_on_ack = false;
 	nanomq_conf->backoff       = 1.5;
 	nanomq_conf->max_inflight_window = 2048;
 	nanomq_conf->max_awaiting_rel = 10;
@@ -1367,6 +1374,8 @@ print_conf(conf *nanomq_conf)
 	log_info("max_awaiting_rel:         %ds", nanomq_conf->max_awaiting_rel);
 	log_info("await_rel_timeout:        %ds", nanomq_conf->await_rel_timeout);
 	log_info("retry_interval:           %ds", nanomq_conf->qos_duration);
+	log_info("resend_on_ack:            %s",
+	    nanomq_conf->resend_on_ack ? "true" : "false");
 	log_info("keepalive_multiplier:     %f", nanomq_conf->backoff);
 
 	if (nanomq_conf->http_server.enable) {

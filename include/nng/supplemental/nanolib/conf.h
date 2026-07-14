@@ -659,6 +659,9 @@ struct conf {
 	uint32_t   max_awaiting_rel;
 	uint32_t   await_rel_timeout;
 	uint32_t   qos_duration;
+	bool       resend_on_ack; // drain a resumed session's stored QoS
+	                          // backlog clocked by the client's acks
+	                          // instead of only the resend timer
 	float      backoff;
 	void      *db_root;
 	bool       allow_anonymous;

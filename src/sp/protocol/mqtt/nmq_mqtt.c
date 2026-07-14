@@ -786,18 +786,20 @@ auth_verify:
 	if (p->conn_param->clean_start == 0) {
 		old = nni_id_get(&s->cached_sessions, p->pipe->p_id);
 		if (old != NULL) {
-			// arm the backlog drain: stored QoS msgs are sent
-			// right after the CONNACK instead of waiting for the
-			// resend timer. Live in-flight rows are told apart
-			// from backlog by msg timestamp, which is only
-			// comparable within one process - sessions restored
-			// from SQLite across a broker restart keep relying
-			// on the resend timer instead.
-			p->resumed     = true;
-			p->resume_time = nng_clock();
-			p->drain_sent  = false;
-			p->drain_retry = NANO_DRAIN_RETRY;
-			p->drain_pid   = 0;
+			// arm the backlog drain (opt-in via resend_on_ack):
+			// stored QoS msgs are sent right after the CONNACK
+			// instead of waiting for the resend timer. Live
+			// in-flight rows are told apart from backlog by msg
+			// timestamp, which is only comparable within one
+			// process - sessions restored from SQLite across a
+			// broker restart keep relying on the resend timer.
+			if (s->conf->resend_on_ack) {
+				p->resumed     = true;
+				p->resume_time = nng_clock();
+				p->drain_sent  = false;
+				p->drain_retry = NANO_DRAIN_RETRY;
+				p->drain_pid   = 0;
+			}
 			// there should be no msg in this map
 			if (!is_sqlite && p->pipe->nano_qos_db!= NULL) {
 				nni_qos_db_fini_id_hash(p->pipe->nano_qos_db);
